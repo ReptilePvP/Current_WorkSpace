@@ -1,7 +1,7 @@
 /*
  * Terp Meter Core - Temperature Monitoring Device
  * See Changelog.md for version history and recent changes
- * Last Updated: 2024-01-24 16:11:43 EST
+ * Last Updated: 2025-01-27 09:36:58 EST
  */
 
 #include <M5CoreS3.h>
@@ -99,11 +99,11 @@ const CRGB LED_COLOR_HOT = CRGB(255, 0, 0);  // Red for too hot
 
 // Status priority levels
 enum StatusPriority {
-    PRIORITY_ALERT = 0,    // Highest priority: Errors, critical alerts
-    PRIORITY_CLOUD = 1,    // Cloud connection status
-    PRIORITY_MONITORING = 2,     // Monitoring state
-    PRIORITY_TEMP = 3,     // Temperature status (when monitoring)
-    PRIORITY_READY = 4     // Lowest priority: Ready state
+    PRIORITY_ALERT = 0,        // Highest priority: Critical alerts
+    PRIORITY_MONITORING = 1,   // Monitoring state changes
+    PRIORITY_TEMP = 2,        // Temperature status
+    PRIORITY_CLOUD = 3,       // Cloud connection status
+    PRIORITY_READY = 4        // Lowest priority: Ready state
 };
 
 // Settings structure
@@ -528,8 +528,6 @@ void loop() {
         if (isValidTemperature(temp)) {
             // Update cloud temperature
             temperature = round(settings.useCelsius ? temp : celsiusToFahrenheit(temp));
-            // Update cloud status
-            statusMessage = state.statusMessage;
             // Update cloud monitoring state
             cloudMonitoring = state.isMonitoring;
             isMonitoring = state.isMonitoring;
@@ -858,7 +856,7 @@ void drawMainDisplay(float temperature) {
                                
         // Draw header text             
         CoreS3.Display.setFont(Config::Display::FONT_HEADER);
-        CoreS3.Display.setTextDatum(middle_center);
+        CoreS3.Display.setTextDatum(top_center);
         CoreS3.Display.setTextColor(Config::Display::COLOR_TEXT);
         CoreS3.Display.drawString("Terp Monitor",
                             (CoreS3.Display.width() / 2) - 10,
@@ -1380,9 +1378,12 @@ void playErrorSound() {
     }
 }
 void onStatusMessageChange() {
-    // Update local status message when cloud value changes
-    state.updateStatusWithPriority(statusMessage, state.statusColor, PRIORITY_CLOUD);
-    updateDisplay();
+    // Only update local status if the change originated from the cloud
+    // and it's not just a monitoring or temperature status
+    if (state.currentPriority > PRIORITY_TEMP) {
+        state.updateStatusWithPriority(statusMessage, state.statusColor, PRIORITY_CLOUD);
+        updateDisplay();
+    }
 }
 void onCloudMonitoringChange() {
     handleMonitoringStateChange(cloudMonitoring, true);
@@ -1404,9 +1405,17 @@ void handleMonitoringStateChange(bool newState, bool fromCloud) {
     leds[0] = newState ? CRGB::Green : CRGB::Black;
     FastLED.show();
     
+    // Clear any existing temperature status if turning monitoring off
+    if (!newState) {
+        state.clearStatus(PRIORITY_TEMP);  // Clear temperature status first
+        state.clearStatus(PRIORITY_MONITORING);  // Clear monitoring status
+    }
+
     // Update status message
     String newStatus = newState ? "Monitoring On" : "Monitoring Off";
     statusMessage = newStatus;  // Update cloud status
+
+    // Set the monitoring status
     state.updateStatusWithPriority(newStatus, 
                       newState ? Config::Display::COLOR_SUCCESS : Config::Display::COLOR_ERROR,
                       PRIORITY_MONITORING);
